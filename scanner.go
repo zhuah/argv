@@ -2,6 +2,17 @@ package argv
 
 import "unicode"
 
+const (
+	sInitial = iota + 1
+	sSpace
+	sReverseQuote
+	sString
+	sStringDollar
+	sStringQuoteSingle
+	sStringQuoteDouble
+	sStringQuoteDoubleDollar
+)
+
 // Scanner is a cmdline string scanner.
 //
 // It split cmdline string to tokens: space, string, pipe, reverse quote string.
@@ -11,6 +22,7 @@ type Scanner struct {
 	text      []rune
 	rpos      int
 	dollarBuf []rune
+	state     uint8
 }
 
 // NewScanner create a scanner and init it's internal states.
@@ -43,7 +55,7 @@ func (s *Scanner) unreadRune(r rune) {
 	}
 }
 
-func (s *Scanner) isEscapeChars(r rune) (rune, bool) {
+func (s *Scanner) isEscapeChars(r rune) (rune, bool) { // nolint: gocyclo
 	switch r {
 	case 'a':
 		return '\a', true
@@ -61,6 +73,10 @@ func (s *Scanner) isEscapeChars(r rune) (rune, bool) {
 		return '\v', true
 	case '\\':
 		return '\\', true
+	case '\'':
+		return '\'', s.state == sStringQuoteSingle
+	case '"':
+		return '"', s.state == sStringQuoteDouble
 	case '$':
 		return '$', true
 	}
@@ -143,27 +159,16 @@ func (s *Scanner) checkDollarEnd(tok *Token, r rune, from, switchTo uint8) uint8
 //
 // Error is returned for invalid syntax such as unpaired quotes.
 func (s *Scanner) Next() (Token, error) {
-	const (
-		Initial = iota + 1
-		Space
-		ReverseQuote
-		String
-		StringDollar
-		StringQuoteSingle
-		StringQuoteDouble
-		StringQuoteDoubleDollar
-	)
-
 	var (
 		tok Token
-
-		state uint8 = Initial
 	)
+
+	s.state = sInitial
 	s.dollarBuf = s.dollarBuf[:0]
 	for {
 		r := s.nextRune()
-		switch state {
-		case Initial:
+		switch s.state {
+		case sInitial:
 			switch {
 			case r == _RuneEOF:
 				tok.Type = TokEOF
@@ -172,21 +177,21 @@ func (s *Scanner) Next() (Token, error) {
 				tok.Type = TokPipe
 				return tok, nil
 			case r == '`':
-				state = ReverseQuote
+				s.state = sReverseQuote
 			case unicode.IsSpace(r):
-				state = Space
+				s.state = sSpace
 				s.unreadRune(r)
 			default:
-				state = String
+				s.state = sString
 				s.unreadRune(r)
 			}
-		case Space:
+		case sSpace:
 			if r == _RuneEOF || !unicode.IsSpace(r) {
 				s.unreadRune(r)
 				tok.Type = TokSpace
 				return tok, nil
 			}
-		case ReverseQuote:
+		case sReverseQuote:
 			switch r {
 			case _RuneEOF:
 				return tok, ErrInvalidSyntax
@@ -196,16 +201,16 @@ func (s *Scanner) Next() (Token, error) {
 			default:
 				tok.Value = append(tok.Value, r)
 			}
-		case String:
+		case sString:
 			switch {
 			case r == _RuneEOF || r == '|' || r == '`' || unicode.IsSpace(r):
 				tok.Type = TokString
 				s.unreadRune(r)
 				return tok, nil
 			case r == '\'':
-				state = StringQuoteSingle
+				s.state = sStringQuoteSingle
 			case r == '"':
-				state = StringQuoteDouble
+				s.state = sStringQuoteDouble
 			case r == '\\':
 				nr := s.nextRune()
 				if nr == _RuneEOF {
@@ -213,18 +218,18 @@ func (s *Scanner) Next() (Token, error) {
 				}
 				tok.Value = append(tok.Value, nr)
 			case r == '$':
-				state = s.checkDollarStart(&tok, r, state, StringDollar)
+				s.state = s.checkDollarStart(&tok, r, s.state, sStringDollar)
 			default:
 				tok.Value = append(tok.Value, r)
 			}
-		case StringDollar:
-			state = s.checkDollarEnd(&tok, r, state, String)
-		case StringQuoteSingle:
+		case sStringDollar:
+			s.state = s.checkDollarEnd(&tok, r, s.state, sString)
+		case sStringQuoteSingle:
 			switch r {
 			case _RuneEOF:
 				return tok, ErrInvalidSyntax
 			case '\'':
-				state = String
+				s.state = sString
 			case '\\':
 				nr := s.nextRune()
 				if escape, ok := s.isEscapeChars(nr); ok {
@@ -236,12 +241,12 @@ func (s *Scanner) Next() (Token, error) {
 			default:
 				tok.Value = append(tok.Value, r)
 			}
-		case StringQuoteDouble:
+		case sStringQuoteDouble:
 			switch r {
 			case _RuneEOF:
 				return tok, ErrInvalidSyntax
 			case '"':
-				state = String
+				s.state = sString
 			case '\\':
 				nr := s.nextRune()
 				if nr == _RuneEOF {
@@ -254,12 +259,12 @@ func (s *Scanner) Next() (Token, error) {
 					s.unreadRune(nr)
 				}
 			case '$':
-				state = s.checkDollarStart(&tok, r, state, StringQuoteDoubleDollar)
+				s.state = s.checkDollarStart(&tok, r, s.state, sStringQuoteDoubleDollar)
 			default:
 				tok.Value = append(tok.Value, r)
 			}
-		case StringQuoteDoubleDollar:
-			state = s.checkDollarEnd(&tok, r, state, StringQuoteDouble)
+		case sStringQuoteDoubleDollar:
+			s.state = s.checkDollarEnd(&tok, r, s.state, sStringQuoteDouble)
 		}
 	}
 }
