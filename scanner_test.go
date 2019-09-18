@@ -8,9 +8,9 @@ import (
 var (
 	parseText = ` a aa a'aa' a"aa"a
 		 a$PATH a"$PATH" a'$PATH'
-		 a"$*" a"$0" a"$\"
+		 a"$*" a"$0" a"$"
 		 a| a|a
-		 a"\A" a"\a\b\f\n\r\t\v\\\$" \t a'\A' a'\t'` +
+		 a"\A" a"\a\b\f\n\r\t\v\\\$" \t a'\A' a'\t' "\"\'" '\"'` +
 		" a`ls /` `ls ~`"
 	env = ParseEnv([]string{
 		"PATH=/bin",
@@ -46,7 +46,7 @@ func TestScanner(t *testing.T) {
 		{Type: TokSpace},
 		{Type: TokString, Value: []rune("a")},
 		{Type: TokSpace},
-		{Type: TokString, Value: []rune("a$\\")},
+		{Type: TokString, Value: []rune("a$")},
 		{Type: TokSpace},
 		{Type: TokString, Value: []rune("a")},
 		{Type: TokPipe},
@@ -64,6 +64,10 @@ func TestScanner(t *testing.T) {
 		{Type: TokString, Value: []rune("a\\A")},
 		{Type: TokSpace},
 		{Type: TokString, Value: []rune("a\t")},
+		{Type: TokSpace},
+		{Type: TokString, Value: []rune(`"\'`)},
+		{Type: TokSpace},
+		{Type: TokString, Value: []rune(`\"`)},
 		{Type: TokSpace},
 		{Type: TokString, Value: []rune("a")},
 		{Type: TokReversequote, Value: []rune("ls /")},
